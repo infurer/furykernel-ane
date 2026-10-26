@@ -1,0 +1,4 @@
+version = 1
+SPDX-PackageName = "furykernel-ane"
+SPDX-PackageSupplier = "Mika Tammi <mikatammi@gmail.com>"
+SPDX-PackageDownloadLocation = "https://github.com/infurer/furykernel-ane"

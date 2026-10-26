@@ -35,6 +35,8 @@
         "LICENSES/*"
         "flake.lock"
         "furykernel-ane.nix"
+        # Third-party files, kept as they were published.
+        "vendor/*"
       ];
     };
   };

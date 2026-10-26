@@ -26,9 +26,10 @@ It depends only on the core library, furykernel. It holds:
   program), a map from its weights to FuryModel tensors with the bf16 →
   fp16 conversion, a manifest, and typed Rust bindings for runtimes.
 
-The Core ML model format is coremltools': its protobuf definitions will be
-vendored here under their BSD-3-Clause license. The emitters write it from
-Haskell, so neither Python nor coremltools is needed.
+The Core ML model format is coremltools': its protobuf definitions are
+vendored here (`vendor/coremltools`, 9.0) under their BSD-3-Clause license.
+The emitters write it from Haskell, so neither Python nor coremltools is
+needed.
 
 It never runs anything on the ANE: it emits programs, which the consuming
 runtime compiles with Core ML at run time. So it builds and is tested on

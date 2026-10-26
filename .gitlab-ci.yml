@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 Mika Tammi
+# SPDX-License-Identifier: BSD-3-Clause
+#
+# GitLab CI on x86_64-linux runners: on master, a push to the public GitHub
+# repository.
+stages:
+  - ci
+  - publish
+# Pushes master to the public GitHub repository, in the publish stage, so
+# only after the ci stage passed: a broken master never reaches GitHub. The
+# ci stage gets its jobs with the repository's first checks.
+#
+# GITHUB_DEPLOY_KEY_B64 is a masked, protected CI variable holding the
+# base64 of an ed25519 private key whose public half is a deploy key with
+# write access on the GitHub repository. The remote and GitHub's host key
+# are public, so they belong in this file, which is mirrored too.
+publish-github:
+  stage: publish
+  interruptible: false
+  resource_group: github-mirror
+  variables:
+    GIT_DEPTH: "0"
+    GITHUB_REMOTE: "git@github.com:infurer/furykernel-ane.git"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  script:
+    - install -d -m700 "$HOME/.github-mirror"
+    - printf '%s' "$GITHUB_DEPLOY_KEY_B64" | base64 -d > "$HOME/.github-mirror/key"
+    - chmod 600 "$HOME/.github-mirror/key"
+    # GitHub's published ed25519 host key; refresh it from
+    # https://api.github.com/meta.
+    - echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$HOME/.github-mirror/known_hosts"
+    # The runner fetches only the pipeline's ref: without this, there are
+    # no tags, and --tags below pushes none.
+    - git fetch --no-recurse-submodules origin '+refs/tags/*:refs/tags/*'
+    # refs/heads/ spelled out: the runner pushes a detached HEAD, at first
+    # into an empty repository, so git can infer neither side's ref type.
+    - git -c core.sshCommand="ssh -i $HOME/.github-mirror/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.github-mirror/known_hosts -o StrictHostKeyChecking=yes" push "$GITHUB_REMOTE" HEAD:refs/heads/master --tags
+  after_script:
+    - rm -rf "$HOME/.github-mirror"

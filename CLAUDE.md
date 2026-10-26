@@ -80,9 +80,16 @@ nix fmt && git diff --exit-code &&
   cabal2nix-in-sync and `reuse lint`), `devshell.nix` and `treefmt.nix`
   (`nix fmt` and `checks.treefmt`).
 - `.gitlab-ci.yml`: GitLab CI on x86_64-linux runners. `checks` runs
-  `nix flake check --all-systems`, which builds x86_64-linux's checks;
-  `publish-github`, on master once it passed, pushes master to the public
-  GitHub repository.
+  `nix flake check --all-systems`, which builds x86_64-linux's checks, and
+  builds both Linux systems' packages;
+  `pins` runs `nix run --no-update-lock-file .#check-pins` (`nix/pins.nix`):
+  every input of ours (the root's inputs but other owners' on GitHub)
+  locked as a `github:infurer` revision on github.com, owners compared
+  case-insensitively, at a commit on GitHub master, and a `flake.lock` to
+  look in, so that it fails until a branch's
+  dependencies are merged, published and locked there; `publish-github`,
+  on master once those passed, pushes master to the public GitHub
+  repository.
 
 ## Conventions
 

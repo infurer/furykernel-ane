@@ -2,3 +2,10 @@ version = 1
 SPDX-PackageName = "furykernel-ane"
 SPDX-PackageSupplier = "Mika Tammi <mikatammi@gmail.com>"
 SPDX-PackageDownloadLocation = "https://github.com/infurer/furykernel-ane"
+
+# Files that cannot carry an SPDX comment themselves.
+
+[[annotations]]
+path = "flake.lock"
+SPDX-FileCopyrightText = "2026 Mika Tammi"
+SPDX-License-Identifier = "BSD-3-Clause"

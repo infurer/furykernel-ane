@@ -5,5 +5,8 @@
 result
 result-*
 
+# cabal's build directory
+dist-newstyle/
+
 # Local Claude Code state
 .claude/

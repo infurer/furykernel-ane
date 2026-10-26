@@ -40,9 +40,16 @@ the runtime that runs them.
 ## Commands
 
 ```sh
-nix develop
+nix develop                # GHC, cabal, ghcid, hlint, cabal2nix, reuse
+cabal build                # inside the dev shell
 nix fmt
 nix flake check --all-systems --no-update-lock-file
+```
+
+After changing `furykernel-ane.cabal`, regenerate `furykernel-ane.nix`:
+
+```sh
+cabal2nix . | sed 's|^  src = .*;$|  src = ./.;|' > furykernel-ane.nix
 ```
 
 `nix flake check` evaluates every system but builds only the current
@@ -65,7 +72,12 @@ nix fmt && git diff --exit-code &&
 
 - `flake.nix`: flake-parts on nixos-26.05; systems x86_64-linux,
   aarch64-linux and aarch64-darwin.
-- `nix/`: `checks.nix` (`reuse lint`), `devshell.nix` and `treefmt.nix`
+- `furykernel-ane.cabal`, `src/`: the library, one package.
+  `furykernel-ane.nix` is cabal2nix's output, committed so that evaluation
+  never builds anything first.
+- `nix/`: `package.nix` (the library, built with GHC 9.12 under
+  `-Werror`), `checks.nix` (the build with its tests, hlint,
+  cabal2nix-in-sync and `reuse lint`), `devshell.nix` and `treefmt.nix`
   (`nix fmt` and `checks.treefmt`).
 - `.gitlab-ci.yml`: GitLab CI on x86_64-linux runners. `publish-github`, on
   master, pushes master to the public GitHub repository.
@@ -76,7 +88,12 @@ nix fmt && git diff --exit-code &&
   (`2026 Mika Tammi`, `BSD-3-Clause`). Files that can't hold comments are
   annotated in `REUSE.toml`.
 - Every file type has a formatter in `nix/treefmt.nix`, enabled in the
-  commit that adds the first file of that type.
+  commit that adds the first file of that type. Haskell is formatted by
+  fourmolu (`fourmolu.yaml`), cabal files by cabal-gild.
+- GHC 9.12 (`haskell.packages.ghc912`, set once in `nix/package.nix`),
+  GHC2024 and the warnings in `furykernel-ane.cabal`'s `warnings` stanza;
+  `-Werror` only in the Nix build, so work in progress still loads in ghci.
+  Modules have export lists.
 - Nothing host-specific in the repository: no hostnames, absolute paths of
   anyone's machine, or names of private repositories and services. master
   is mirrored to a public GitHub repository in full.

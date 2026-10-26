@@ -1,0 +1,44 @@
+cabal-version: 3.0
+-- SPDX-FileCopyrightText: 2026 Mika Tammi
+-- SPDX-License-Identifier: BSD-3-Clause
+--
+-- The header sits below `cabal-version` because from spec 2.2 on that field
+-- must be the file's first line, not even preceded by a comment.
+name: furykernel-ane
+version: 0.2.0.0
+synopsis: The Apple Neural Engine target of FuryKernel
+description:
+  furykernel-ane lowers FuryKernel programs for the Apple Neural Engine: the
+  Neural Engine's limits and the gate that holds a stage to them, and the
+  emitters of Core ML programs and of the manifests runtimes read, their
+  weight maps included. It emits programs only; runtimes compile them with
+  Core ML.
+
+homepage: https://github.com/infurer/furykernel-ane
+license: BSD-3-Clause
+license-file: LICENSES/BSD-3-Clause.txt
+author: Mika Tammi
+maintainer: mikatammi@gmail.com
+copyright: 2026 Mika Tammi
+category: Compilers/Interpreters
+build-type: Simple
+extra-doc-files: README.md
+tested-with: ghc ==9.12.3
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wpartial-fields
+    -Wmissing-export-lists
+
+common extensions
+  default-language: GHC2024
+
+library
+  import: warnings, extensions
+  hs-source-dirs: src
+  exposed-modules: FuryKernel.Ane
+  build-depends: base >=4.21 && <5

@@ -9,3 +9,9 @@ SPDX-PackageDownloadLocation = "https://github.com/infurer/furykernel-ane"
 path = "flake.lock"
 SPDX-FileCopyrightText = "2026 Mika Tammi"
 SPDX-License-Identifier = "BSD-3-Clause"
+
+# cabal2nix's output; checks.cabal2nix-in-sync compares it with a fresh run.
+[[annotations]]
+path = "furykernel-ane.nix"
+SPDX-FileCopyrightText = "2026 Mika Tammi"
+SPDX-License-Identifier = "BSD-3-Clause"

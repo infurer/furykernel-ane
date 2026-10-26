@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 Mika Tammi
+# SPDX-License-Identifier: BSD-3-Clause
+indentation: 2
+# Leading commas in lists and records. The reason is diffs: adding a field touches one
+# line instead of two, so a review shows the change and not the punctuation.
+comma-style: leading
+import-export-style: diff-friendly
+indent-wheres: false
+record-brace-space: true
+newlines-between-decls: 1
+haddock-style: multi-line
+respectful: true
+unicode: never

@@ -14,7 +14,10 @@
 
       programs = {
         alejandra.enable = true;
+        cabal-gild.enable = true;
         deadnix.enable = true;
+        # Configured by fourmolu.yaml.
+        fourmolu.enable = true;
         statix.enable = true;
         taplo.enable = true;
         mdformat = {
@@ -25,11 +28,13 @@
         yamlfmt.enable = true;
       };
 
-      # Files without a formatter.
+      # Files without a formatter, and cabal2nix's output, which
+      # checks.cabal2nix-in-sync compares with a fresh run byte for byte.
       settings.global.excludes = [
         ".gitignore"
         "LICENSES/*"
         "flake.lock"
+        "furykernel-ane.nix"
       ];
     };
   };

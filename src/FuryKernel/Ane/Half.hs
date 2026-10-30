@@ -1,12 +1,15 @@
 -- SPDX-FileCopyrightText: 2026 Mika Tammi
 -- SPDX-License-Identifier: BSD-3-Clause
 
-{- | IEEE binary16, the ANE's compute type: conversion from bf16 and f32 with
-round-to-nearest-even, and the range statistics of a conversion, which say
-whether a tensor survives the trip into fp16.
+{- | IEEE binary16, the type of the ANE's programs: conversion from bf16 and
+f32 with round-to-nearest-even, and the range statistics of a conversion,
+which say whether a tensor survives the trip into fp16. The ANE computes
+its activations in a narrower range ("FuryKernel.Ane.Lower"); weights
+keep their binary16.
 -}
 module FuryKernel.Ane.Half (
   floatToHalf,
+  halfToDouble,
   halfBytes,
   Range (..),
   bf16ToHalf,
@@ -53,6 +56,17 @@ floatBitsToHalf x
 
 floatToHalf :: Float -> Word16
 floatToHalf = floatBitsToHalf . castFloatToWord32
+
+-- | A binary16's value, exactly: infinities and NaN as such.
+halfToDouble :: Word16 -> Double
+halfToDouble h
+  | e == 0x1f = if m == 0 then sign / 0 else 0 / 0
+  | e == 0 = sign * m * 2 ^^ (-24 :: Int)
+  | otherwise = sign * (1 + m / 1024) * 2 ^^ (e - 15)
+ where
+  sign = if testBit h 15 then -1 else 1
+  e = fromIntegral ((h `shiftR` 10) .&. 0x1f) :: Int
+  m = fromIntegral (h .&. 0x3ff) :: Double
 
 -- | Little-endian fp16 bytes of a list of floats.
 halfBytes :: [Float] -> B.ByteString

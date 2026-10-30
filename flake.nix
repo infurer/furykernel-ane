@@ -8,6 +8,14 @@
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
     };
+    furykernel = {
+      url = "github:infurer/furykernel";
+      inputs = {
+        flake-parts.follows = "flake-parts";
+        nixpkgs.follows = "nixpkgs";
+        treefmt-nix.follows = "treefmt-nix";
+      };
+    };
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";

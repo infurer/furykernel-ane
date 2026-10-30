@@ -17,6 +17,7 @@
             exit 1
           fi
           status=0
+          ours=0
           # The root's own inputs: each is ours unless it comes from someone
           # else's GitHub, so that one locked as path:, git+file: or a GitLab
           # URL is looked at too. GitHub's owners are case-insensitive.
@@ -25,6 +26,7 @@
             if [ "$(jq -r '.type' <<<"$original")" = github ] && [ "$(jq -r '.owner // "" | ascii_downcase' <<<"$original")" != infurer ]; then
               continue
             fi
+            ours=$((ours + 1))
             locked=$(jq -c --arg node "$node" '.nodes[$node].locked' flake.lock)
             type=$(jq -r '.type' <<<"$locked")
             owner=$(jq -r '.owner // "" | ascii_downcase' <<<"$locked")
@@ -56,6 +58,10 @@
             fi
             rm -rf "$scratch"
           done
+          if [ "$ours" = 0 ]; then
+            echo "no input of ours in flake.lock" >&2
+            status=1
+          fi
           exit "$status"
         '';
       });

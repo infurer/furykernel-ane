@@ -7,7 +7,7 @@ module Test.FuryKernel.Ane.HalfTest (tests) where
 import Data.Bits (shiftR, (.&.))
 import Data.ByteString qualified as B
 import Data.Word (Word16)
-import FuryKernel.Ane.Half (Range (..), bf16ToFloat, bf16ToHalf, floatToHalf, halfBytes)
+import FuryKernel.Ane.Half (Range (..), bf16ToFloat, bf16ToHalf, floatToHalf, halfBytes, halfToDouble)
 import Hedgehog (forAll, property, (===))
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
@@ -50,6 +50,9 @@ tests =
     , testProperty "every finite binary16 comes back as itself" $ property $ do
         h <- forAll (Gen.filter (\w -> w .&. 0x7c00 /= 0x7c00) (Gen.word16 Range.constantBounded))
         floatToHalf (halfValue h) === h
+    , testProperty "a binary16 read back is its value" $ property $ do
+        h <- forAll (Gen.filter (\w -> w .&. 0x7c00 /= 0x7c00) (Gen.word16 Range.constantBounded))
+        halfToDouble h === realToFrac (halfValue h)
     , testCase "fp16 bytes are little-endian" $
         halfBytes [1, -2] @?= B.pack [0x00, 0x3c, 0x00, 0xc0]
     , testCase "bf16 to fp16 says what the trip did" $ do

@@ -1,16 +1,18 @@
-{ mkDerivation, base, bytestring, directory, filepath, hedgehog
-, lib, tasty, tasty-hedgehog, tasty-hunit, transformers
+{ mkDerivation, array, base, bytestring, containers, directory
+, filepath, furykernel, hedgehog, lib, tasty, tasty-hedgehog
+, tasty-hunit, text, transformers
 }:
 mkDerivation {
   pname = "furykernel-ane";
   version = "0.2.0.0";
   src = ./.;
   libraryHaskellDepends = [
-    base bytestring directory filepath transformers
+    array base bytestring containers directory filepath furykernel text
+    transformers
   ];
   testHaskellDepends = [
-    base bytestring directory filepath hedgehog tasty tasty-hedgehog
-    tasty-hunit
+    base bytestring containers directory filepath furykernel hedgehog
+    tasty tasty-hedgehog tasty-hunit text
   ];
   homepage = "https://github.com/infurer/furykernel-ane";
   description = "The Apple Neural Engine target of FuryKernel";

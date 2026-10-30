@@ -16,9 +16,14 @@ path = "furykernel-ane.nix"
 SPDX-FileCopyrightText = "2026 Mika Tammi"
 SPDX-License-Identifier = "BSD-3-Clause"
 
-# The tiny program's golden bytes, and protoc's decoding of them.
+# The tiny program's golden bytes, protoc's decoding of them, and a lowered
+# stage's manifest.
 [[annotations]]
-path = ["test/golden/tiny.mlmodel", "test/golden/tiny.txt"]
+path = [
+  "test/golden/tiny.mlmodel",
+  "test/golden/tiny.txt",
+  "test/golden/draft_step.json",
+]
 SPDX-FileCopyrightText = "2026 Mika Tammi"
 SPDX-License-Identifier = "BSD-3-Clause"
 

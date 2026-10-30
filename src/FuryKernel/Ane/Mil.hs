@@ -23,9 +23,14 @@ module FuryKernel.Ane.Mil (
   Weight (..),
   Built (..),
   runMil,
+  runMilWith,
   elementType,
   input,
   output,
+  named,
+  reserve,
+  unique,
+  numbered,
 
   -- * Constants
   constBlob,
@@ -38,13 +43,18 @@ module FuryKernel.Ane.Mil (
 
   -- * Ops
   op,
+  opOf,
   add,
   sub,
   mul,
+  realDiv,
   reduceMean,
+  reduceArgmax,
   rsqrt,
   softmax,
   gelu,
+  tanhOp,
+  castFp16,
   conv1x1,
   reshape,
   sliceAxis,
@@ -52,15 +62,23 @@ module FuryKernel.Ane.Mil (
   matmul,
   rmsNorm,
   layerNorm,
+  transpose,
 ) where
 
 import Control.Monad.Trans.State.Strict (State, gets, modify', runState, state)
+import Data.Bits (shiftR)
 import Data.ByteString qualified as B
 import Data.Int (Int32)
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
+import Data.Maybe (fromMaybe, isJust)
+import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Word (Word64)
 import FuryKernel.Ane.Blob (BlobType (..), Blobs, addBlob, emptyBlobs, reserveBlob)
 import FuryKernel.Ane.CoreML
-import FuryKernel.Ane.Half (halfBytes)
+import FuryKernel.Numerics (narrowF16Double)
+import FuryKernel.Type (F16 (..))
 
 -- | A value of the program: its name and type.
 data Var = Var {varName :: String, varType :: TensorType}
@@ -70,13 +88,15 @@ shapeOf :: Var -> [Word64]
 shapeOf = ttShape . varType
 
 {- | A weight a runtime writes into the blob file: the offset of its blob's
-record, the model's tensor it comes from, its shape, and a factor its
-elements are multiplied by on the way, converted to the program's element
-type.
+record, the model's tensor it comes from and the element of the tensor it
+starts at, its shape (as many elements as the shape has, in the tensor's
+order), and a factor its elements are multiplied by on the way, converted
+to the program's element type.
 -}
 data Weight = Weight
   { weightRecord :: Word64
   , weightTensor :: String
+  , weightOffset :: Word64
   , weightShape :: [Word64]
   , weightScale :: Double
   }
@@ -100,6 +120,12 @@ data St = St
   -- ^ Reversed.
   , stWeights :: [Weight]
   -- ^ Reversed.
+  , stWeightVars :: Map (String, Word64, [Word64], Double) Var
+  -- ^ Each weight's const, which every use of it shares.
+  , stTaken :: Set String
+  -- ^ Every name of the program so far, and those reserved for it.
+  , stRenamed :: Map String String
+  -- ^ The values whose op an output or 'named' renamed: the new name.
   }
 
 newtype Mil a = Mil (State St a)
@@ -109,8 +135,12 @@ newtype Mil a = Mil (State St a)
 type (fp16 for the ANE, fp32 for a reference), its outputs those returned.
 -}
 runMil :: DataType -> Mil [Var] -> Built
-runMil t (Mil build) =
-  let (outs, st) = runState build (St t 0 [] emptyBlobs [] [])
+runMil t build = fst (runMilWith t ((,()) <$> build))
+
+-- | 'runMil', with what the build returns besides its outputs.
+runMilWith :: DataType -> Mil ([Var], a) -> (Built, a)
+runMilWith t (Mil build) =
+  let ((outs, other), st) = runState build (St t 0 [] emptyBlobs [] [] Map.empty Set.empty Map.empty)
       ins = reverse st.stInputs
       fn =
         Function
@@ -126,14 +156,39 @@ runMil t (Mil build) =
           , modelOutputs = [Feature v.varName v.varType | v <- outs]
           , modelFunctions = [("main", fn)]
           }
-   in Built model st.stBlobs (reverse st.stWeights)
+   in (Built model st.stBlobs (reverse st.stWeights), other)
 
 elementType :: Mil DataType
 elementType = Mil (gets (.stType))
 
+-- | A name of this prefix and the counter's next number that no name of the program has.
 fresh :: String -> Mil String
 fresh prefix = Mil $ state $ \st ->
-  (prefix <> "_" <> show st.stCounter, st {stCounter = st.stCounter + 1})
+  case [(n, k) | k <- [st.stCounter ..], let n = prefix <> "_" <> show k, n `Set.notMember` st.stTaken] of
+    (n, k) : _ -> (n, st {stCounter = k + 1, stTaken = Set.insert n st.stTaken})
+    [] -> error "Mil: no free name"
+
+{- | Names the program will have, given before it is built (its inputs and
+outputs), which every name made after keeps clear of.
+-}
+reserve :: [String] -> Mil ()
+reserve ns = Mil (modify' (\st -> st {stTaken = foldr Set.insert st.stTaken ns}))
+
+{- | This name if no name of the program has it, else the first of it with
+@_1@, @_2@ and so on that none has; taken from then on.
+-}
+unique :: String -> Mil String
+unique n = Mil $ state $ \st ->
+  case [c | c <- n : [n <> "_" <> show k | k <- [1 :: Int ..]], c `Set.notMember` st.stTaken] of
+    c : _ -> (c, st {stTaken = Set.insert c st.stTaken})
+    [] -> error "Mil: no free name"
+
+-- | The prefix and the first number from 0 that no name of the program has; taken from then on.
+numbered :: String -> Mil String
+numbered prefix = Mil $ state $ \st ->
+  case [n | k <- [0 :: Int ..], let n = prefix <> show k, n `Set.notMember` st.stTaken] of
+    n : _ -> (n, st {stTaken = Set.insert n st.stTaken})
+    [] -> error "Mil: no free name"
 
 emit :: Op -> Mil ()
 emit o = Mil (modify' (\st -> st {stOps = o : st.stOps}))
@@ -144,14 +199,61 @@ nameAttr n = ("name", Immediate (TensorType String []) (Strings [n]))
 -- | A program input of this name and type.
 input :: String -> TensorType -> Mil Var
 input n t = do
-  Mil (modify' (\st -> st {stInputs = (n, t) : st.stInputs}))
+  Mil (modify' (\st -> st {stInputs = (n, t) : st.stInputs, stTaken = Set.insert n st.stTaken}))
   pure (Var n t)
 
-{- | The value as a program output of this name: its op renamed, if it was
-the last one appended, else an identity of it.
+{- | The value as a program output of this name: its op renamed, if no op
+reads it and no output renamed it already (the value under its old name
+is gone then), else an identity of it under its name now. The name is
+the caller's to keep clear ('reserve').
 -}
 output :: String -> Var -> Mil Var
 output new v = do
+  Mil (modify' (\st -> st {stTaken = Set.insert new st.stTaken}))
+  now <- Mil (gets (Map.lookup v.varName . (.stRenamed)))
+  done <- case now of
+    Just _ -> pure Nothing
+    Nothing -> unread new v
+  case done of
+    Just v' -> do
+      Mil (modify' (\st -> st {stRenamed = Map.insert v.varName new st.stRenamed}))
+      pure v'
+    Nothing -> do
+      let t = v.varType
+      emit
+        Op
+          { opType = "identity"
+          , opInputs = [("x", [ArgName (fromMaybe v.varName now)])]
+          , opOutputs = [(new, t)]
+          , opAttributes = [nameAttr new]
+          }
+      pure (Var new t)
+
+{- | The value under this name, if the last op appended made it (and so
+nothing reads it yet): names that tell what a program's ops compute, in
+the places Core ML reports them. Otherwise the value as it was.
+-}
+named :: String -> Var -> Mil Var
+named new v = fromMaybe v <$> renamed new v
+
+-- | The value's op renamed, wherever it is, if no op reads the value.
+unread :: String -> Var -> Mil (Maybe Var)
+unread new v = do
+  ops <- Mil (gets (.stOps))
+  let readsIt o = any (\(_, as) -> ArgName v.varName `elem` as) o.opInputs
+      rename o = case o.opOutputs of
+        [(old, t)] | old == v.varName -> Just (o {opOutputs = [(new, t)], opAttributes = nameAttr new : drop 1 o.opAttributes}, t)
+        _ -> Nothing
+  case break (isJust . rename) ops of
+    (later, o : earlier)
+      | not (any readsIt later)
+      , Just (o', t) <- rename o -> do
+          Mil (modify' (\st -> st {stOps = later <> (o' : earlier)}))
+          pure (Just (Var new t))
+    _ -> pure Nothing
+
+renamed :: String -> Var -> Mil (Maybe Var)
+renamed new v = do
   ops <- Mil (gets (.stOps))
   case ops of
     o : rest
@@ -159,17 +261,8 @@ output new v = do
       , old == v.varName -> do
           let o' = o {opOutputs = [(new, t)], opAttributes = nameAttr new : drop 1 o.opAttributes}
           Mil (modify' (\st -> st {stOps = o' : rest}))
-          pure (Var new t)
-    _ -> do
-      let t = v.varType
-      emit
-        Op
-          { opType = "identity"
-          , opInputs = [("x", [ArgName v.varName])]
-          , opOutputs = [(new, t)]
-          , opAttributes = [nameAttr new]
-          }
-      pure (Var new t)
+          pure (Just (Var new t))
+    _ -> pure Nothing
 
 constValue :: String -> TensorType -> Value -> Mil Var
 constValue prefix t v = do
@@ -201,26 +294,35 @@ elementSize = \case
   Int32 -> 4
   _ -> 2
 
-{- | A model's tensor of this shape, its elements times this factor, its
-blob reserved for a runtime to fill.
+{- | A model's tensor, from this element on, in this shape, its elements
+times this factor; its blob reserved for a runtime to fill. The same
+weight asked for again is the same const.
 -}
-weight :: String -> [Word64] -> Double -> Mil Var
-weight tensor shape scale = do
-  dt <- elementType
-  off <- Mil $ state $ \st ->
-    let (o, b) = reserveBlob (blobType dt) (product shape * elementSize dt) st.stBlobs
-     in (o, st {stBlobs = b, stWeights = Weight o tensor shape scale : st.stWeights})
-  let t = TensorType dt shape
-  constValue "w" t (BlobFile t blobPath off)
+weight :: String -> Word64 -> [Word64] -> Double -> Mil Var
+weight tensor from shape scale = do
+  let key = (tensor, from, shape, scale)
+  Mil (gets (Map.lookup key . (.stWeightVars))) >>= \case
+    Just v -> pure v
+    Nothing -> do
+      dt <- elementType
+      off <- Mil $ state $ \st ->
+        let (o, b) = reserveBlob (blobType dt) (product shape * elementSize dt) st.stBlobs
+         in (o, st {stBlobs = b, stWeights = Weight o tensor from shape scale : st.stWeights})
+      let t = TensorType dt shape
+      v <- constValue "w" t (BlobFile t blobPath off)
+      Mil (modify' (\st -> st {stWeightVars = Map.insert key v st.stWeightVars}))
+      pure v
 
--- | A scalar of the program's element type.
-constScalar :: Float -> Mil Var
+{- | A scalar of the program's element type, rounded to it once, to
+nearest with ties to even.
+-}
+constScalar :: Double -> Mil Var
 constScalar x = do
   dt <- elementType
   let t = TensorType dt []
       imm = case dt of
-        Float32 -> Floats [x]
-        _ -> Bytes (halfBytes [x])
+        Float32 -> Floats [realToFrac x]
+        _ -> let F16 h = narrowF16Double x in Bytes (B.pack [fromIntegral h, fromIntegral (h `shiftR` 8)])
   constValue "scalar" t (Immediate t imm)
 
 constInts :: [Int32] -> Mil Var
@@ -246,11 +348,15 @@ constStr x = constValue "str" t (Immediate t (Strings [x]))
 -- | An op with one output of the given shape, in its first input's element type.
 op :: String -> [(String, [Var])] -> [Word64] -> Mil Var
 op ty ins shape = do
-  n <- fresh ty
   dt <- case ins of
     (_, v : _) : _ -> pure v.varType.ttDataType
     _ -> elementType
-  let t = TensorType dt shape
+  opOf ty ins (TensorType dt shape)
+
+-- | An op with one output of the given type.
+opOf :: String -> [(String, [Var])] -> TensorType -> Mil Var
+opOf ty ins t = do
+  n <- fresh ty
   emit
     Op
       { opType = ty
@@ -269,10 +375,11 @@ broadcast a b = zipWith max (pad a) (pad b)
 binary :: String -> Var -> Var -> Mil Var
 binary ty x y = op ty [("x", [x]), ("y", [y])] (broadcast (shapeOf x) (shapeOf y))
 
-add, sub, mul :: Var -> Var -> Mil Var
+add, sub, mul, realDiv :: Var -> Var -> Mil Var
 add = binary "add"
 sub = binary "sub"
 mul = binary "mul"
+realDiv = binary "real_div"
 
 reduceMean :: Var -> [Int] -> Mil Var
 reduceMean x axes = do
@@ -283,8 +390,20 @@ reduceMean x axes = do
     [("x", [x]), ("axes", [a]), ("keep_dims", [k])]
     [if i `elem` axes then 1 else d | (i, d) <- zip [0 ..] (shapeOf x)]
 
+{- | The index of the largest element along an axis, kept as an axis of
+one: int32.
+-}
+reduceArgmax :: Var -> Int -> Mil Var
+reduceArgmax x axis = do
+  a <- constInt (fromIntegral axis)
+  k <- constBool True
+  opOf
+    "reduce_argmax"
+    [("x", [x]), ("axis", [a]), ("keep_dims", [k])]
+    (TensorType Int32 [if i == axis then 1 else d | (i, d) <- zip [0 ..] (shapeOf x)])
+
 -- | @1 / sqrt (x + epsilon)@.
-rsqrt :: Var -> Float -> Mil Var
+rsqrt :: Var -> Double -> Mil Var
 rsqrt x eps = do
   e <- constScalar eps
   op "rsqrt" [("x", [x]), ("epsilon", [e])] (shapeOf x)
@@ -293,6 +412,19 @@ softmax :: Var -> Int -> Mil Var
 softmax x axis = do
   a <- constInt (fromIntegral axis)
   op "softmax" [("x", [x]), ("axis", [a])] (shapeOf x)
+
+tanhOp :: Var -> Mil Var
+tanhOp x = op "tanh" [("x", [x])] (shapeOf x)
+
+{- | @x@ as binary16, to nearest, ties to even, whatever the program's
+element type: an identity on the fp16 tensors the ANE computes in, which
+Core ML fuses with the op that makes @x@, that says where a program
+rounds to fp16.
+-}
+castFp16 :: Var -> Mil Var
+castFp16 x = do
+  d <- constStr "fp16"
+  opOf "cast" [("x", [x]), ("dtype", [d])] (TensorType Float16 (shapeOf x))
 
 -- | GELU; the mode is @EXACT@, @TANH_APPROXIMATION@ or @SIGMOID_APPROXIMATION@.
 gelu :: Var -> String -> Mil Var
@@ -371,19 +503,40 @@ given, as the layer norm of @x@ beside @-x@ along the axis, cut back to
 @mean (x^2)@. It squares nothing in the program, so no input is scaled
 to keep a square in fp16's range, which would move small inputs where
 the ANE's values are coarse.
+
+Along axis 2 of four (a head's elements, in the per-head layout), it
+moves the axis last around the norm, by transposes: Core ML's CPU
+computes the layer norm of a concat along axis 2 wrongly at some shapes,
+as observed under macOS 27.2 (heads 0, 1, 4 and 5 of @[1, 6, 64, 128]@
+NaN or wrong), and right along the last axis.
 -}
-rmsNorm :: Var -> Int -> Maybe Var -> Float -> Mil Var
+rmsNorm :: Var -> Int -> Maybe Var -> Double -> Mil Var
 rmsNorm x axis w eps = do
-  neg <- mul x =<< constScalar (-1)
-  both <- concatAxis [x, neg] axis
-  normed <- layerNorm both [axis] eps
-  y <- sliceAxis normed axis 0 (shapeOf x !! axis)
+  y <-
+    if axis == 2 && length (shapeOf x) == 4
+      then do
+        xt <- transpose x [0, 1, 3, 2]
+        yt <- besideItsNegation xt 3
+        transpose yt [0, 1, 3, 2]
+      else besideItsNegation x axis
   maybe (pure y) (mul y) w
+ where
+  besideItsNegation v a = do
+    neg <- mul v =<< constScalar (-1)
+    both <- concatAxis [v, neg] a
+    normed <- layerNorm both [a] eps
+    sliceAxis normed a 0 (shapeOf v !! a)
+
+-- | The axes in a new order: the result's axis @i@ is the input's @perm !! i@.
+transpose :: Var -> [Int] -> Mil Var
+transpose x perm = do
+  p <- constInts (map fromIntegral perm)
+  op "transpose" [("x", [x]), ("perm", [p])] [shapeOf x !! a | a <- perm]
 
 {- | Layer normalisation along axes, without a gamma or beta:
 @(x - mean x) / sqrt (var x + eps)@, the variance the population's.
 -}
-layerNorm :: Var -> [Int] -> Float -> Mil Var
+layerNorm :: Var -> [Int] -> Double -> Mil Var
 layerNorm x axes eps = do
   a <- constInts (map fromIntegral axes)
   e <- constScalar eps

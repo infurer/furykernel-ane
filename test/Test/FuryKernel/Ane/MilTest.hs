@@ -43,30 +43,48 @@ tests =
             tmp <- getTemporaryDirectory
             B.writeFile (tmp </> "tiny.mlmodel") got
             assertFailure ("the encoding changed; it is in " <> tmp </> "tiny.mlmodel, to replace " <> golden)
-    , testCase "an output names its op, or an identity of an earlier value" $ do
+    , testCase "an output names its op, or an identity of a value ops read" $ do
         let built = runMil Float32 $ do
               x <- input "x" (TensorType Float32 [2])
               y <- mul x x
-              z <- add x x
-              b <- output "b" z
+              z <- add y y
+              w <- mul x x
+              c <- output "c" z
+              b <- output "b" w
               a <- output "a" y
-              pure [a, b]
+              pure [a, b, c]
             ops = case built.builtModel.modelFunctions of
               [(_, f)] -> f.fnOperations
               _ -> []
         map (\o -> (o.opType, map fst o.opOutputs)) ops
-          @?= [("mul", ["mul_0"]), ("add", ["b"]), ("identity", ["a"])]
-    , testCase "a model's weights are reserved and listed" $ do
+          @?= [("mul", ["mul_0"]), ("add", ["c"]), ("mul", ["b"]), ("identity", ["a"])]
+    , testCase "a model's weights are reserved and listed, each once" $ do
         let built = runMil Float16 $ do
               x <- input "x" (TensorType Float16 [1, 4, 1, 1])
-              w <- weight "layers.0.q_proj" [8, 4, 1, 1] 1
-              _ <- weight "layers.0.norm" [4] 0.0625
+              w <- weight "layers.0.q_proj" 0 [8, 4, 1, 1] 1
+              _ <- weight "layers.0.norm" 0 [4] 0.0625
+              w' <- weight "layers.0.q_proj" 0 [8, 4, 1, 1] 1
+              _ <- weight "embed" 32 [8, 4, 1, 1] 1
               y <- conv1x1 x w
-              pure <$> output "y" y
+              y' <- conv1x1 x w'
+              pure <$> (output "y" =<< add y y')
         built.builtWeights
-          @?= [ Weight 64 "layers.0.q_proj" [8, 4, 1, 1] 1
-              , Weight 192 "layers.0.norm" [4] 0.0625
+          @?= [ Weight 64 "layers.0.q_proj" 0 [8, 4, 1, 1] 1
+              , Weight 192 "layers.0.norm" 0 [4] 0.0625
+              , Weight 320 "embed" 32 [8, 4, 1, 1] 1
               ]
         map (\p -> (p.placedSize, p.placedBytes)) (blobsLayout built.builtBlobs)
-          @?= [(64, Nothing), (8, Nothing)]
+          @?= [(64, Nothing), (8, Nothing), (64, Nothing)]
+    , testCase "a value is named where the last op made it" $ do
+        let built = runMil Float32 $ do
+              x <- input "x" (TensorType Float32 [2])
+              y <- named "squared" =<< mul x x
+              z <- add y y
+              _ <- named "late" y
+              pure <$> output "z" z
+            ops = case built.builtModel.modelFunctions of
+              [(_, f)] -> f.fnOperations
+              _ -> []
+        map (\o -> (o.opType, map fst o.opOutputs, [a | (_, as) <- o.opInputs, ArgName a <- as])) ops
+          @?= [("mul", ["squared"], ["x", "x"]), ("add", ["z"], ["squared", "squared"])]
     ]

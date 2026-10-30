@@ -9,14 +9,20 @@
 # import-from-derivation, and evaluating the flake would have to build
 # something first. `checks.cabal2nix-in-sync` keeps it in step with the
 # .cabal file.
-{
+{inputs, ...}: {
   perSystem = {
     lib,
     pkgs,
+    system,
     ...
   }: let
     hlib = pkgs.haskell.lib.compose;
-    haskellPackages = pkgs.haskell.packages.ghc912;
+    # furykernel as its own flake builds it, on the same GHC.
+    haskellPackages = pkgs.haskell.packages.ghc912.override {
+      overrides = _: _: {
+        inherit (inputs.furykernel.packages.${system}) furykernel;
+      };
+    };
 
     # Only the files the build reads, so that result links or editor
     # droppings don't change its inputs.

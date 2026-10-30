@@ -141,7 +141,8 @@ nix fmt && git diff --exit-code &&
     only;
   - `FuryKernel.Ane.CoreML`: the subset of the Core ML specification an ML
     program needs (Model.proto, FeatureTypes.proto, MIL.proto), its field
-    numbers the vendored definitions';
+    numbers the vendored definitions', and a text form of programs for
+    reviews of generated ones;
   - `FuryKernel.Ane.Blob`: the blob file of a program's weights (version 2),
     each blob's bytes given or its size reserved, for a runtime to write a
     model's tensors at the offsets its layout gives;

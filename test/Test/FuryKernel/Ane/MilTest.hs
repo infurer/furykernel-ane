@@ -10,6 +10,7 @@ module Test.FuryKernel.Ane.MilTest (tests) where
 import Control.Exception (IOException, try)
 import Data.ByteString qualified as B
 import Data.ByteString.Lazy qualified as BL
+import Data.Text qualified as T
 import FuryKernel.Ane.Blob (Placed (..), blobsLayout)
 import FuryKernel.Ane.CoreML
 import FuryKernel.Ane.Mil
@@ -43,6 +44,16 @@ tests =
             tmp <- getTemporaryDirectory
             B.writeFile (tmp </> "tiny.mlmodel") got
             assertFailure ("the encoding changed; it is in " <> tmp </> "tiny.mlmodel, to replace " <> golden)
+    , testCase "a program as text" $
+        renderModel tiny.builtModel
+          @?= T.unlines
+            [ "function main(%x: fp16[1, 4])"
+            , "  %scalar_0: fp16[] = const(val = 2.0)"
+            , "  %scalar_1: fp16[] = const(val = 1.0)"
+            , "  %mul_2: fp16[1, 4] = mul(x = %x, y = %scalar_0)"
+            , "  %y: fp16[1, 4] = add(x = %scalar_1, y = %mul_2)"
+            , "  return (%y)"
+            ]
     , testCase "an output names its op, or an identity of a value ops read" $ do
         let built = runMil Float32 $ do
               x <- input "x" (TensorType Float32 [2])

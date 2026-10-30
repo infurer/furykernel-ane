@@ -3,7 +3,8 @@
 
 {- | The subset of the Core ML model specification that an ML program needs,
 with its encoding. Field numbers are those of coremltools' Model.proto,
-FeatureTypes.proto and MIL.proto (vendor/coremltools).
+FeatureTypes.proto and MIL.proto (vendor/coremltools). A text form of
+programs ('renderModel') is for people: reviews of generated programs.
 -}
 module FuryKernel.Ane.CoreML (
   DataType (..),
@@ -16,12 +17,17 @@ module FuryKernel.Ane.CoreML (
   Feature (..),
   Model (..),
   encodeModel,
+  renderModel,
 ) where
 
+import Data.Bits (shiftL, (.|.))
 import Data.ByteString qualified as B
 import Data.ByteString.Lazy qualified as BL
 import Data.Int (Int32)
+import Data.Text (Text)
+import Data.Text qualified as T
 import Data.Word (Word64)
+import FuryKernel.Ane.Half (halfToDouble)
 import FuryKernel.Ane.Protobuf qualified as P
 
 -- | Element types, as MIL.proto's DataType.
@@ -166,3 +172,54 @@ encodeModel m =
           502
           (P.int64 1 1 <> foldMap (\(n, f) -> P.mapEntry 2 (P.string 1 n) (P.message 2 (function f))) (modelFunctions m))
     )
+
+{- | A program as text, one line per op, in the order the block runs them:
+each output with its type, the op and its named arguments; a const's
+value inline, or its blob's offset. Deterministic, as the encoding is.
+-}
+renderModel :: Model -> Text
+renderModel m = T.unlines (concatMap fn (modelFunctions m))
+ where
+  fn (name, f) =
+    ["function " <> T.pack name <> "(" <> T.intercalate ", " (map typed (fnInputs f)) <> ")"]
+      <> map op (fnOperations f)
+      <> ["  return (" <> T.intercalate ", " (map (("%" <>) . T.pack) (fnOutputs f)) <> ")"]
+  typed (n, t) = "%" <> T.pack n <> ": " <> tensorText t
+  tensorText (TensorType dt shape) =
+    dtText dt <> "[" <> T.intercalate ", " (map (T.pack . show) shape) <> "]"
+  dtText = \case
+    Bool -> "bool"
+    String -> "string"
+    Float16 -> "fp16"
+    Float32 -> "fp32"
+    Int32 -> "int32"
+  op o =
+    "  "
+      <> T.intercalate ", " (map typed (opOutputs o))
+      <> " = "
+      <> T.pack (opType o)
+      <> "("
+      <> T.intercalate ", " (map input (opInputs o) <> [T.pack k <> " = " <> valueText v | (k, v) <- opAttributes o, k /= "name"])
+      <> ")"
+  input (k, as) =
+    T.pack k <> " = " <> case as of
+      [a] -> arg a
+      _ -> "(" <> T.intercalate ", " (map arg as) <> ")"
+  arg = \case
+    ArgName n -> "%" <> T.pack n
+    ArgValue v -> valueText v
+  valueText = \case
+    Immediate _ imm -> case imm of
+      Floats xs -> list (map (T.pack . show) xs)
+      Ints xs -> list (map (T.pack . show) xs)
+      Bools xs -> list [if b then "true" else "false" | b <- xs]
+      Strings xs -> list (map (T.pack . show) xs)
+      Bytes b -> list (map (T.pack . show) (halves b))
+    BlobFile _ _ off -> "blob(" <> T.pack (show off) <> ")"
+  list = \case
+    [x] -> x
+    xs -> "[" <> T.intercalate ", " xs <> "]"
+  halves b =
+    [ halfToDouble (fromIntegral (B.index b i) .|. (fromIntegral (B.index b (i + 1)) `shiftL` 8))
+    | i <- [0, 2 .. B.length b - 2]
+    ]

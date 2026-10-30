@@ -37,6 +37,9 @@
         "furykernel-ane.nix"
         # Third-party files, kept as they were published.
         "vendor/*"
+        # The golden tests' bytes and text, which the tests write and compare
+        # as they are.
+        "test/golden/*"
       ];
     };
   };

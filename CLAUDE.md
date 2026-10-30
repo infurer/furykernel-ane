@@ -29,7 +29,8 @@ It depends only on the core library, furykernel. It holds:
 The Core ML model format is coremltools': its protobuf definitions are
 vendored here (`vendor/coremltools`, 9.0) under their BSD-3-Clause license.
 The emitters write it from Haskell, so neither Python nor coremltools is
-needed.
+needed. Programs are specification version 10 with the opset `CoreML9`,
+for macOS 26 and later: the newest that macOS 27.2's Core ML takes.
 
 It never runs anything on the ANE: it emits programs, which the consuming
 runtime compiles with Core ML at run time. So it builds and is tested on
@@ -41,7 +42,7 @@ the runtime that runs them.
 ## Commands
 
 ```sh
-nix develop                # GHC, cabal, ghcid, hlint, cabal2nix, reuse
+nix develop                # GHC, cabal, ghcid, hlint, cabal2nix, reuse, protoc
 cabal build                # inside the dev shell
 nix fmt
 nix flake check --all-systems --no-update-lock-file
@@ -51,6 +52,17 @@ After changing `furykernel-ane.cabal`, regenerate `furykernel-ane.nix`:
 
 ```sh
 cabal2nix . | sed 's|^  src = .*;$|  src = ./.;|' > furykernel-ane.nix
+```
+
+When the encoding of ML programs changes on purpose, the tiny program's
+golden test fails and writes the new bytes to the temporary directory;
+copy them over `test/golden/tiny.mlmodel` and decode them into the golden
+text, which `checks.protoc-decode` compares:
+
+```sh
+protoc --decode=CoreML.Specification.Model \
+  --proto_path=vendor/coremltools/format vendor/coremltools/format/Model.proto \
+  < test/golden/tiny.mlmodel > test/golden/tiny.txt
 ```
 
 `nix flake check` evaluates every system but builds only the current
@@ -75,9 +87,35 @@ nix fmt && git diff --exit-code &&
   aarch64-linux and aarch64-darwin.
 - `furykernel-ane.cabal`, `src/`: the library, one package.
   `furykernel-ane.nix` is cabal2nix's output, committed so that evaluation
-  never builds anything first.
+  never builds anything first. The Core ML program writer, promoted from the
+  ANE spike:
+  - `FuryKernel.Ane.Protobuf`: the protocol buffers wire format, encoding
+    only;
+  - `FuryKernel.Ane.CoreML`: the subset of the Core ML specification an ML
+    program needs (Model.proto, FeatureTypes.proto, MIL.proto), its field
+    numbers the vendored definitions';
+  - `FuryKernel.Ane.Blob`: the blob file of a program's weights (version 2),
+    each blob's bytes given or its size reserved, for a runtime to write a
+    model's tensors at the offsets its layout gives;
+  - `FuryKernel.Ane.Package`: the `.mlpackage` directory, with fixed
+    identifiers;
+  - `FuryKernel.Ane.Half`: binary16, rounding to nearest even, and what a
+    conversion from bf16 does to a tensor's range;
+  - `FuryKernel.Ane.Mil`: a pure builder of ML programs (one function, one
+    block), in fp16 or as an fp32 reference, whose weights can be a model's
+    tensors, reserved and listed in its weight map.
+- `test/`: tasty with hedgehog: the wire format against the protocol
+  buffers documentation's examples, rounding to binary16 (every finite
+  value back as itself), the blob file's layout and bytes, and a tiny
+  program against its golden bytes. Apple's `coremlc` accepts what the
+  writer makes (checked by hand on a Mac; runtimes compile programs with
+  Core ML).
+- `vendor/coremltools/`: the Core ML model format's definitions, as
+  published.
 - `nix/`: `package.nix` (the library, built with GHC 9.12 under
-  `-Werror`), `checks.nix` (the build with its tests, hlint,
+  `-Werror`), `checks.nix` (the build with its tests, `protoc-decode`,
+  which decodes the golden bytes with protoc against the vendored
+  definitions and compares them with the golden text, hlint,
   cabal2nix-in-sync and `reuse lint`), `devshell.nix` and `treefmt.nix`
   (`nix fmt` and `checks.treefmt`).
 - `.gitlab-ci.yml`: GitLab CI on x86_64-linux runners. `checks` runs

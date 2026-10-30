@@ -12,12 +12,27 @@
       # The library and its tests, under -Werror.
       build = pkgs.haskell.lib.compose.doCheck config.packages.furykernel-ane;
 
+      # The tiny program's golden bytes, which the tests hold the encoder to,
+      # decoded by protoc against coremltools' own definitions: they must say
+      # what the golden text says.
+      protoc-decode =
+        pkgs.runCommand "protoc-decode" {
+          nativeBuildInputs = [pkgs.protobuf pkgs.diffutils];
+        } ''
+          protoc --decode=CoreML.Specification.Model \
+            --proto_path=${self}/vendor/coremltools/format \
+            ${self}/vendor/coremltools/format/Model.proto \
+            < ${self}/test/golden/tiny.mlmodel > decoded.txt
+          diff -u ${self}/test/golden/tiny.txt decoded.txt
+          touch $out
+        '';
+
       # The hints `nix fmt` cannot apply on its own.
       hlint =
         pkgs.runCommand "hlint" {
           nativeBuildInputs = [pkgs.hlint];
         } ''
-          hlint --hint=${self}/.hlint.yaml ${self}/src
+          hlint --hint=${self}/.hlint.yaml ${self}/src ${self}/test
           touch $out
         '';
 

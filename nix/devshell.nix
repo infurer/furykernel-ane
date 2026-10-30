@@ -18,6 +18,8 @@
         pkgs.cabal2nix
         pkgs.haskellPackages.ghcid
         pkgs.hlint
+        # protoc, for decoding the golden program's bytes (CLAUDE.md).
+        pkgs.protobuf
         pkgs.reuse
       ];
     };

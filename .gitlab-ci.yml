@@ -49,10 +49,11 @@ publish-github:
     # https://api.github.com/meta.
     - echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$HOME/.github-mirror/known_hosts"
     # The runner fetches only the pipeline's ref: without this, there are
-    # no tags, and --tags below pushes none.
+    # no tags to push.
     - git fetch --no-recurse-submodules origin '+refs/tags/*:refs/tags/*'
-    # refs/heads/ spelled out: the runner pushes a detached HEAD, at first
+    # Master and the tags it holds, no other branch's. refs/heads/ and
+    # refs/tags/ spelled out: the runner pushes a detached HEAD, at first
     # into an empty repository, so git can infer neither side's ref type.
-    - git -c core.sshCommand="ssh -i $HOME/.github-mirror/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.github-mirror/known_hosts -o StrictHostKeyChecking=yes" push "$GITHUB_REMOTE" HEAD:refs/heads/master --tags
+    - git -c core.sshCommand="ssh -i $HOME/.github-mirror/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.github-mirror/known_hosts -o StrictHostKeyChecking=yes" push "$GITHUB_REMOTE" HEAD:refs/heads/master $(git tag --merged HEAD | sed 's|.*|refs/tags/&:refs/tags/&|')
   after_script:
     - rm -rf "$HOME/.github-mirror"

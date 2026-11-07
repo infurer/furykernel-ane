@@ -88,8 +88,8 @@ nix fmt && git diff --exit-code &&
   case-insensitively, at a commit on GitHub master, and a `flake.lock` to
   look in, so that it fails until a branch's
   dependencies are merged, published and locked there; `publish-github`,
-  on master once those passed, pushes master to the public GitHub
-  repository.
+  on master once those passed, pushes master, and the tags it holds, to
+  the public GitHub repository.
 
 ## Conventions
 

@@ -2,10 +2,23 @@
 # SPDX-License-Identifier: BSD-3-Clause
 #
 # GitLab CI on x86_64-linux runners: the flake's checks, the inputs' pins,
-# and on master a push to the public GitHub repository.
+# the tarballs a release would upload to Hackage, and on master a push to
+# the public GitHub repository and the release of the release tags merged
+# into it.
 stages:
   - ci
   - publish
+  - release
+# Branch pipelines only. A release tag reaches GitLab on a commit master has
+# or with its merge request (nix/release.sh), and a master pipeline releases
+# it, so tags get no pipeline of their own.
+workflow:
+  rules:
+    - if: '$CI_COMMIT_TAG'
+      when: never
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - when: always
 # Every system evaluated, x86_64-linux's checks built. The other systems'
 # checks are built before every commit (CLAUDE.md).
 checks:
@@ -25,35 +38,73 @@ pins:
   interruptible: true
   script:
     - nix run --no-update-lock-file .#check-pins
-# Pushes master to the public GitHub repository, in the publish stage, so
-# only after the ci stage passed: a broken master never reaches GitHub.
+# What a release would upload to Hackage, short of the upload: the release
+# job's own script builds the tarballs (nix run .#publish-releases --
+# --check): cabal check, the source tarball, the package built and tested
+# from it, and its documentation. A merge request whose package couldn't be
+# released doesn't merge.
+publish-check:
+  stage: ci
+  interruptible: true
+  script:
+    - nix run --no-update-lock-file .#publish-releases -- --check
+# The public GitHub repository over ssh, for the jobs that push to it.
 #
 # GITHUB_DEPLOY_KEY_B64 is a masked, protected CI variable holding the
 # base64 of an ed25519 private key whose public half is a deploy key with
 # write access on the GitHub repository. The remote and GitHub's host key
-# are public, so they belong in this file, which is mirrored too.
-publish-github:
-  stage: publish
-  interruptible: false
-  resource_group: github-mirror
+# are public, so they belong in this file, which is mirrored too. The key's
+# directory is the job's own, in case a home is ever shared: resource_group
+# orders only this project's jobs.
+.github:
   variables:
     GIT_DEPTH: "0"
     GITHUB_REMOTE: "git@github.com:infurer/furykernel-ane.git"
+  before_script:
+    - key_dir="$HOME/.github-mirror-$CI_PROJECT_ID-$CI_JOB_ID"
+    - install -d -m700 "$key_dir"
+    - printf '%s' "$GITHUB_DEPLOY_KEY_B64" | base64 -d > "$key_dir/key"
+    - chmod 600 "$key_dir/key"
+    # GitHub's published ed25519 host key; refresh it from
+    # https://api.github.com/meta.
+    - echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$key_dir/known_hosts"
+    - export GITHUB_SSH_COMMAND="ssh -i $key_dir/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$key_dir/known_hosts -o StrictHostKeyChecking=yes"
+  after_script:
+    - rm -rf "$HOME/.github-mirror-$CI_PROJECT_ID-$CI_JOB_ID"
+# Pushes master to the public GitHub repository, in the publish stage, so
+# only after the ci stage passed: a broken master never reaches GitHub. Tags
+# go only through the release job, once checked.
+publish-github:
+  extends: .github
+  stage: publish
+  interruptible: false
+  resource_group: github-mirror
   rules:
     - if: '$CI_COMMIT_BRANCH == "master"'
   script:
-    - install -d -m700 "$HOME/.github-mirror"
-    - printf '%s' "$GITHUB_DEPLOY_KEY_B64" | base64 -d > "$HOME/.github-mirror/key"
-    - chmod 600 "$HOME/.github-mirror/key"
-    # GitHub's published ed25519 host key; refresh it from
-    # https://api.github.com/meta.
-    - echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$HOME/.github-mirror/known_hosts"
-    # The runner fetches only the pipeline's ref: without this, there are
-    # no tags to push.
-    - git fetch --no-recurse-submodules origin '+refs/tags/*:refs/tags/*'
-    # Master and the tags it holds, no other branch's. refs/heads/ and
-    # refs/tags/ spelled out: the runner pushes a detached HEAD, at first
+    # refs/heads/ spelled out: the runner pushes a detached HEAD, at first
     # into an empty repository, so git can infer neither side's ref type.
-    - git -c core.sshCommand="ssh -i $HOME/.github-mirror/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.github-mirror/known_hosts -o StrictHostKeyChecking=yes" push "$GITHUB_REMOTE" HEAD:refs/heads/master $(git tag --merged HEAD | sed 's|.*|refs/tags/&:refs/tags/&|')
-  after_script:
-    - rm -rf "$HOME/.github-mirror"
+    - git -c core.sshCommand="$GITHUB_SSH_COMMAND" push "$GITHUB_REMOTE" HEAD:refs/heads/master
+# Releases the release tags merged into master, after master reached GitHub
+# (nix/publish-releases.sh): each is checked against the release signing
+# key and its commit's version; a pre-release goes to Hackage as the
+# candidate of its version, a release to Hackage's index, each with its
+# documentation, and then the tags go to GitHub. A run after a failure
+# carries on where the last one stopped, and one with nothing to release
+# does nothing.
+#
+# HACKAGE_TOKEN is a masked, protected and hidden CI variable holding a
+# Hackage API token of a maintainer of the package. RELEASE_SIGNING_KEY is a
+# protected file variable holding the public key whose fingerprint is
+# RELEASE_SIGNER, the key release tags are signed with.
+release:
+  extends: .github
+  stage: release
+  interruptible: false
+  resource_group: release
+  variables:
+    RELEASE_SIGNER: "3606AD2B342F70B3B306E724BF5BDF55A9735223"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "master"'
+  script:
+    - nix run --no-update-lock-file .#publish-releases

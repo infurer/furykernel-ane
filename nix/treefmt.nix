@@ -18,6 +18,7 @@
         deadnix.enable = true;
         # Configured by fourmolu.yaml.
         fourmolu.enable = true;
+        shfmt.enable = true;
         statix.enable = true;
         taplo.enable = true;
         # The toolchain's own rustfmt, so `nix fmt` and `cargo fmt` agree.

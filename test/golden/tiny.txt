@@ -1,0 +1,257 @@
+specificationVersion: 10
+description {
+  input {
+    name: "x"
+    type {
+      multiArrayType {
+        shape: 1
+        shape: 4
+        dataType: FLOAT16
+      }
+    }
+  }
+  output {
+    name: "y"
+    type {
+      multiArrayType {
+        shape: 1
+        shape: 4
+        dataType: FLOAT16
+      }
+    }
+  }
+}
+mlProgram {
+  version: 1
+  functions {
+    key: "main"
+    value {
+      inputs {
+        name: "x"
+        type {
+          tensorType {
+            dataType: FLOAT16
+            rank: 2
+            dimensions {
+              constant {
+                size: 1
+              }
+            }
+            dimensions {
+              constant {
+                size: 4
+              }
+            }
+          }
+        }
+      }
+      opset: "CoreML9"
+      block_specializations {
+        key: "CoreML9"
+        value {
+          outputs: "y"
+          operations {
+            type: "const"
+            outputs {
+              name: "scalar_0"
+              type {
+                tensorType {
+                  dataType: FLOAT16
+                }
+              }
+            }
+            attributes {
+              key: "name"
+              value {
+                type {
+                  tensorType {
+                    dataType: STRING
+                  }
+                }
+                immediateValue {
+                  tensor {
+                    strings {
+                      values: "scalar_0"
+                    }
+                  }
+                }
+              }
+            }
+            attributes {
+              key: "val"
+              value {
+                type {
+                  tensorType {
+                    dataType: FLOAT16
+                  }
+                }
+                immediateValue {
+                  tensor {
+                    bytes {
+                      values: "\000@"
+                    }
+                  }
+                }
+              }
+            }
+          }
+          operations {
+            type: "const"
+            outputs {
+              name: "scalar_1"
+              type {
+                tensorType {
+                  dataType: FLOAT16
+                }
+              }
+            }
+            attributes {
+              key: "name"
+              value {
+                type {
+                  tensorType {
+                    dataType: STRING
+                  }
+                }
+                immediateValue {
+                  tensor {
+                    strings {
+                      values: "scalar_1"
+                    }
+                  }
+                }
+              }
+            }
+            attributes {
+              key: "val"
+              value {
+                type {
+                  tensorType {
+                    dataType: FLOAT16
+                  }
+                }
+                immediateValue {
+                  tensor {
+                    bytes {
+                      values: "\000<"
+                    }
+                  }
+                }
+              }
+            }
+          }
+          operations {
+            type: "mul"
+            inputs {
+              key: "x"
+              value {
+                arguments {
+                  name: "x"
+                }
+              }
+            }
+            inputs {
+              key: "y"
+              value {
+                arguments {
+                  name: "scalar_0"
+                }
+              }
+            }
+            outputs {
+              name: "mul_2"
+              type {
+                tensorType {
+                  dataType: FLOAT16
+                  rank: 2
+                  dimensions {
+                    constant {
+                      size: 1
+                    }
+                  }
+                  dimensions {
+                    constant {
+                      size: 4
+                    }
+                  }
+                }
+              }
+            }
+            attributes {
+              key: "name"
+              value {
+                type {
+                  tensorType {
+                    dataType: STRING
+                  }
+                }
+                immediateValue {
+                  tensor {
+                    strings {
+                      values: "mul_2"
+                    }
+                  }
+                }
+              }
+            }
+          }
+          operations {
+            type: "add"
+            inputs {
+              key: "x"
+              value {
+                arguments {
+                  name: "scalar_1"
+                }
+              }
+            }
+            inputs {
+              key: "y"
+              value {
+                arguments {
+                  name: "mul_2"
+                }
+              }
+            }
+            outputs {
+              name: "y"
+              type {
+                tensorType {
+                  dataType: FLOAT16
+                  rank: 2
+                  dimensions {
+                    constant {
+                      size: 1
+                    }
+                  }
+                  dimensions {
+                    constant {
+                      size: 4
+                    }
+                  }
+                }
+              }
+            }
+            attributes {
+              key: "name"
+              value {
+                type {
+                  tensorType {
+                    dataType: STRING
+                  }
+                }
+                immediateValue {
+                  tensor {
+                    strings {
+                      values: "y"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,42 @@
+version = 1
+SPDX-PackageName = "furykernel-ane"
+SPDX-PackageSupplier = "Mika Tammi <mikatammi@gmail.com>"
+SPDX-PackageDownloadLocation = "https://github.com/infurer/furykernel-ane"
+
+# Files that cannot carry an SPDX comment themselves.
+
+[[annotations]]
+path = "flake.lock"
+SPDX-FileCopyrightText = "2026 Mika Tammi"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+[[annotations]]
+path = "test/ane/Cargo.lock"
+SPDX-FileCopyrightText = "2026 Mika Tammi"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+# cabal2nix's output; checks.cabal2nix-in-sync compares it with a fresh run.
+[[annotations]]
+path = "furykernel-ane.nix"
+SPDX-FileCopyrightText = "2026 Mika Tammi"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+# The tiny program's golden bytes, protoc's decoding of them, and a lowered
+# stage's manifest.
+[[annotations]]
+path = [
+  "test/golden/tiny.mlmodel",
+  "test/golden/tiny.txt",
+  "test/golden/draft_step.json",
+]
+SPDX-FileCopyrightText = "2026 Mika Tammi"
+SPDX-License-Identifier = "BSD-3-Clause"
+
+# coremltools' Core ML model format definitions, mlmodel/format at its 9.0
+# tag with the LICENSE.txt they name, vendored as they are: the encoder's
+# field numbers come from them, and `protoc --decode` checks its output
+# against them. Their notices are of 2017 to 2022.
+[[annotations]]
+path = "vendor/coremltools/**"
+SPDX-FileCopyrightText = "2017-2022 Apple Inc."
+SPDX-License-Identifier = "BSD-3-Clause"

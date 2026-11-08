@@ -1,0 +1,102 @@
+cabal-version: 3.0
+-- SPDX-FileCopyrightText: 2026 Mika Tammi
+-- SPDX-License-Identifier: BSD-3-Clause
+--
+-- The header sits below `cabal-version` because from spec 2.2 on that field
+-- must be the file's first line, not even preceded by a comment.
+name: furykernel-ane
+version: 0.2.0.0
+synopsis: The Apple Neural Engine target of FuryKernel
+description:
+  furykernel-ane lowers FuryKernel programs for the Apple Neural Engine: the
+  Neural Engine's limits and the gate that holds a stage to them, and the
+  emitters of Core ML programs and of the manifests runtimes read, their
+  weight maps included. It emits programs only; runtimes compile them with
+  Core ML.
+
+homepage: https://github.com/infurer/furykernel-ane
+license: BSD-3-Clause
+license-file: LICENSES/BSD-3-Clause.txt
+author: Mika Tammi
+maintainer: mikatammi@gmail.com
+copyright: 2026 Mika Tammi
+category: Compilers/Interpreters
+build-type: Simple
+extra-doc-files: README.md
+extra-source-files:
+  test/golden/draft_step.json
+  test/golden/tiny.mlmodel
+  test/golden/tiny.txt
+
+tested-with: ghc ==9.12.3
+
+common warnings
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wpartial-fields
+    -Wmissing-export-lists
+
+common extensions
+  default-language: GHC2024
+  default-extensions:
+    OverloadedRecordDot
+    OverloadedStrings
+    StrictData
+
+library
+  import: warnings, extensions
+  hs-source-dirs: src
+  exposed-modules:
+    FuryKernel.Ane
+    FuryKernel.Ane.Blob
+    FuryKernel.Ane.CoreML
+    FuryKernel.Ane.Half
+    FuryKernel.Ane.Host
+    FuryKernel.Ane.Interp
+    FuryKernel.Ane.Lower
+    FuryKernel.Ane.Manifest
+    FuryKernel.Ane.Mil
+    FuryKernel.Ane.Package
+    FuryKernel.Ane.Protobuf
+    FuryKernel.Ane.Stage
+
+  build-depends:
+    array >=0.5 && <0.6,
+    base >=4.21 && <5,
+    bytestring >=0.12 && <0.13,
+    containers >=0.7 && <0.8,
+    directory >=1.3 && <1.4,
+    filepath >=1.5 && <1.6,
+    furykernel >=0.2 && <0.3,
+    text >=2.1 && <2.2,
+    transformers >=0.6 && <0.7,
+
+test-suite furykernel-ane-test
+  import: warnings, extensions
+  type: exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is: Main.hs
+  other-modules:
+    Test.FuryKernel.Ane.BlobTest
+    Test.FuryKernel.Ane.HalfTest
+    Test.FuryKernel.Ane.LowerTest
+    Test.FuryKernel.Ane.MilTest
+    Test.FuryKernel.Ane.ProtobufTest
+    Test.FuryKernel.Ane.Stages
+
+  build-depends:
+    base,
+    bytestring,
+    containers,
+    directory,
+    filepath,
+    furykernel,
+    furykernel-ane,
+    hedgehog >=1.5 && <1.6,
+    tasty >=1.5 && <1.6,
+    tasty-hedgehog >=1.4 && <1.5,
+    tasty-hunit >=0.10 && <0.11,
+    text,

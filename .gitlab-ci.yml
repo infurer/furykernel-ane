@@ -1,14 +1,32 @@
 # SPDX-FileCopyrightText: 2026 Mika Tammi
 # SPDX-License-Identifier: BSD-3-Clause
 #
-# GitLab CI on x86_64-linux runners: on master, a push to the public GitHub
-# repository.
+# GitLab CI on x86_64-linux runners: the flake's checks, the inputs' pins,
+# and on master a push to the public GitHub repository.
 stages:
   - ci
   - publish
+# Every system evaluated, x86_64-linux's checks built. The other systems'
+# checks are built before every commit (CLAUDE.md).
+checks:
+  stage: ci
+  interruptible: true
+  script:
+    # The packages, listed by hand: x86_64-linux's is checks.build, which
+    # the line below builds too; aarch64-linux's builds on its remote
+    # builder. Their tests run in checkPhase.
+    - nix build --no-link --no-update-lock-file -L .#packages.x86_64-linux.furykernel-ane .#packages.aarch64-linux.furykernel-ane
+    - nix flake check --all-systems --no-update-lock-file -L
+# Every input of ours locked at a commit on GitHub master: it fails until a
+# branch's dependencies are merged, published and locked there, so that a
+# merge waits for them.
+pins:
+  stage: ci
+  interruptible: true
+  script:
+    - nix run --no-update-lock-file .#check-pins
 # Pushes master to the public GitHub repository, in the publish stage, so
-# only after the ci stage passed: a broken master never reaches GitHub. The
-# ci stage gets its jobs with the repository's first checks.
+# only after the ci stage passed: a broken master never reaches GitHub.
 #
 # GITHUB_DEPLOY_KEY_B64 is a masked, protected CI variable holding the
 # base64 of an ed25519 private key whose public half is a deploy key with
@@ -31,10 +49,11 @@ publish-github:
     # https://api.github.com/meta.
     - echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > "$HOME/.github-mirror/known_hosts"
     # The runner fetches only the pipeline's ref: without this, there are
-    # no tags, and --tags below pushes none.
+    # no tags to push.
     - git fetch --no-recurse-submodules origin '+refs/tags/*:refs/tags/*'
-    # refs/heads/ spelled out: the runner pushes a detached HEAD, at first
+    # Master and the tags it holds, no other branch's. refs/heads/ and
+    # refs/tags/ spelled out: the runner pushes a detached HEAD, at first
     # into an empty repository, so git can infer neither side's ref type.
-    - git -c core.sshCommand="ssh -i $HOME/.github-mirror/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.github-mirror/known_hosts -o StrictHostKeyChecking=yes" push "$GITHUB_REMOTE" HEAD:refs/heads/master --tags
+    - git -c core.sshCommand="ssh -i $HOME/.github-mirror/key -o IdentitiesOnly=yes -o UserKnownHostsFile=$HOME/.github-mirror/known_hosts -o StrictHostKeyChecking=yes" push "$GITHUB_REMOTE" HEAD:refs/heads/master $(git tag --merged HEAD | sed 's|.*|refs/tags/&:refs/tags/&|')
   after_script:
     - rm -rf "$HOME/.github-mirror"

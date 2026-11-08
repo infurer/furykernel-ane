@@ -1,0 +1,15 @@
+# SPDX-FileCopyrightText: 2026 Mika Tammi
+# SPDX-License-Identifier: BSD-3-Clause
+
+# Nix build outputs
+result
+result-*
+
+# cabal's build directory
+dist-newstyle/
+
+# cargo's, the conformance runner's
+target/
+
+# Local Claude Code state
+.claude/

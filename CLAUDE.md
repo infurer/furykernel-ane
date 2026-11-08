@@ -303,7 +303,15 @@ change can be held to it before it is committed;
 - GHC 9.12 (`haskell.packages.ghc912`, set once in `nix/package.nix`),
   GHC2024 and the warnings in `furykernel-ane.cabal`'s `warnings` stanza;
   `-Werror` only in the Nix build, so work in progress still loads in ghci.
-  Modules have export lists.
+  Modules have export lists. `-Wmissing-home-modules` makes a module the
+  .cabal file doesn't list, which Hackage's source tarball would lack, an
+  error.
+- Every dependency has a lower and an upper bound by the PVP
+  (https://pvp.haskell.org/), below its next major version, stated once:
+  the test suite shares the library's bounds and states only its own
+  dependencies'. base stays below the next GHC's until that GHC is tested.
+- `CHANGELOG.md` is the change log Hackage shows on the package's page, a
+  section per version; 0.2.0.0 is the initial release.
 - Nothing host-specific in the repository: no hostnames, absolute paths of
   anyone's machine, or names of private repositories and services. master
   is mirrored to a public GitHub repository in full.

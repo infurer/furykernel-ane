@@ -1,0 +1,20 @@
+# SPDX-FileCopyrightText: 2026 Mika Tammi
+# SPDX-License-Identifier: BSD-3-Clause
+
+# The Neural Engine conformance run (apps.ane-conformance): the corpus
+# Cases.hs writes, compiled and predicted by Core ML on this Mac and
+# compared with the evaluator's and the interpreter's outputs.
+[package]
+name = "furykernel-ane-conformance"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-core-ml = "0.3"
+objc2-foundation = "0.3"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }

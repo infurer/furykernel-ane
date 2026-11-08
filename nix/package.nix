@@ -33,7 +33,8 @@
         ../README.md
         ../furykernel-ane.cabal
         ../src
-        ../test
+        # The conformance run is no part of the library's build.
+        (lib.fileset.difference ../test ../test/ane)
       ];
     };
 

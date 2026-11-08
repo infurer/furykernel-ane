@@ -8,5 +8,8 @@ result-*
 # cabal's build directory
 dist-newstyle/
 
+# cargo's, the conformance runner's
+target/
+
 # Local Claude Code state
 .claude/

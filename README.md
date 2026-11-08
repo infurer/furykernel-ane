@@ -45,11 +45,19 @@ macOS 27.2.
 ## Building and testing
 
 ```sh
-nix build         # the library, its test suite run in the check phase
-nix develop       # GHC, cabal and the tools
-cabal build       # inside the dev shell
-nix flake check   # the build, its tests and every other check
+nix build                  # the library, its test suite run in the check phase
+nix develop                # GHC, cabal and the tools
+cabal build                # inside the dev shell
+nix flake check            # the build, its tests and every other check
+nix run .#ane-conformance  # on an Apple silicon Mac: the conformance run
 ```
+
+The Neural Engine conformance run needs an Apple silicon Mac, on macOS 26
+or later, so it runs outside CI: in the per-commit gate, and again on each
+new Mac or macOS. It lowers a corpus of stages (`test/ane`), runs it on
+the Neural Engine as a runtime would, and holds every output to the core's
+evaluator and to the interpreter, within 2^-7 of each row's largest
+magnitude (2^-6 for an output made through a softcap).
 
 ## License
 

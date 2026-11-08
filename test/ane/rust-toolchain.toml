@@ -1,0 +1,7 @@
+# SPDX-FileCopyrightText: 2026 Mika Tammi
+# SPDX-License-Identifier: BSD-3-Clause
+
+# rust-overlay's latest stable as of flake.lock; `nix flake update` moves it.
+[toolchain]
+channel = "stable"
+components = ["clippy", "rustfmt"]

@@ -85,6 +85,7 @@ test-suite furykernel-ane-test
     Test.FuryKernel.Ane.LowerTest
     Test.FuryKernel.Ane.MilTest
     Test.FuryKernel.Ane.ProtobufTest
+    Test.FuryKernel.Ane.Stages
 
   build-depends:
     base,

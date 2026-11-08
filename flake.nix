@@ -4,6 +4,8 @@
   description = "furykernel-ane: the Apple Neural Engine target of FuryKernel";
 
   inputs = {
+    # The Neural Engine conformance runner's Rust (nix/rust.nix), as the core's own.
+    crane.follows = "furykernel/crane";
     flake-parts = {
       url = "github:hercules-ci/flake-parts";
       inputs.nixpkgs-lib.follows = "nixpkgs";
@@ -17,6 +19,7 @@
       };
     };
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
+    rust-overlay.follows = "furykernel/rust-overlay";
     treefmt-nix = {
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";

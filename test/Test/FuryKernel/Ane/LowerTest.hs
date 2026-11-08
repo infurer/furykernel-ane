@@ -7,12 +7,13 @@ by the f64 interpreter on what the host derives for it. Weights, inputs
 and caches are small dyadic numbers, exact in fp16, so the two differ by
 f64 rounding alone.
 
-Two stages: one of a step that drafts (a token gathered beside a state,
-attention over a ring's mirror with a window and over a paged cache's,
-an output layer wider than the caps' channels, its argmax), and one of an
-image's tower (patches projected and placed, two layers of
-self-attention over the step's own rows with two rotary axes, the rows
-pooled, standardized and projected), whose padding rows change nothing.
+Two stages, Test.FuryKernel.Ane.Stages' at their small sizes: one of a
+step that drafts (a token gathered beside a state, attention over a
+ring's mirror with a window and over a paged cache's, an output layer
+wider than the caps' channels, its argmax), and one of an image's tower
+(patches projected and placed, two layers of self-attention over the
+step's own rows with two rotary axes, the rows pooled, standardized and
+projected), whose padding rows change nothing.
 -}
 module Test.FuryKernel.Ane.LowerTest (tests) where
 
@@ -33,26 +34,20 @@ import FuryKernel.Ane.Manifest
 import FuryKernel.Ane.Mil (Built (..))
 import FuryKernel.Ane.Stage
 import FuryKernel.Program.Build qualified as B
-import FuryKernel.Program.Check (CheckedProgram, checkProgram, checkedProgram)
+import FuryKernel.Program.Check (checkedProgram)
 import FuryKernel.Program.Eval (Kept (..))
-import FuryKernel.Program.Graph (AttendTo (..), AttnSpec (..), CacheElem (..), CacheLayout (..), Node (..), Op (..), Program (..), Reach (..), RopePairs (..), RopeSpec (..), Source (..), StoreAt (..), programSource, wholeRow)
+import FuryKernel.Program.Graph (Node (..), Op (..), Program (..), Source (..), StoreAt (..), programSource, wholeRow)
 import FuryKernel.Type (ScalarType (..))
 import Numeric.Natural (Natural)
 import System.Directory (getTemporaryDirectory)
 import System.FilePath ((</>))
+import Test.FuryKernel.Ane.Stages
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (Assertion, assertBool, assertFailure, testCase, (@?=))
 
 -- | Small caps: outputs of 16 channels at most.
 caps :: Caps
 caps = appleNE {capsChannels = 16}
-
--- | An epsilon exact in fp16.
-eps :: Double
-eps = 2 ^^ (-10 :: Int)
-
-checked :: Program -> CheckedProgram
-checked p = either (\fs -> error ("a test program fails its gate: " <> show fs)) id (checkProgram p)
 
 -- | Deterministic dyadic numbers: @k / denominator@ for @|k| <= 64@.
 dyadic :: Int -> Double -> Int -> [Double]
@@ -63,122 +58,8 @@ dyadic seed denominator n = take n [fromIntegral (x `mod` 129 - 64) / denominato
 ------------------------------------------------------------------------------
 -- A drafting step
 
-draftIn :: Program
-draftIn = B.program "t_in" $ do
-  tokens <- B.rowInts "tokens" 1 32
-  state <- B.input "state" (wholeRow 8) TF32
-  table <- B.weight "embed" [32, 8]
-  proj <- B.weight "proj" [6, 16]
-  e <- B.gather "embedded" table tokens 4
-  joined <- B.concatenate "joined" e state
-  x <- B.linear "x" proj 0 joined
-  B.output "x" x
-
-ringLayer :: Program
-ringLayer = B.program "t_ring" $ do
-  x <- B.input "x" (wholeRow 6) TF32
-  pos <- B.rowInts "position" 1 16
-  seen <- B.rowInts "seen" 1 16
-  slot <- B.rowInts "slot" 1 2
-  norm <- B.weight "norm" [6]
-  wq <- B.weight "q_proj" [8, 6]
-  qNorm <- B.weight "q_norm" [4]
-  wo <- B.weight "o_proj" [6, 8]
-  k <- B.cacheOf CacheF16 "k_cache" (Ring 2 1 6 4)
-  v <- B.cacheOf CacheF16 "v_cache" (Ring 2 1 6 4)
-  a <- B.rmsnorm "a" eps (Just norm) 1 x
-  q <- B.linear "q" wq 4 a
-  qn <- B.rmsnorm "qn" eps (Just qNorm) 1 q
-  qr <- B.rope "qr" (RopeSpec 10000 2 1 RopeHalves) pos qn
-  att <- B.attend "att" (AttnSpec 2 1 4 (Just 4) 1 Nothing) qr AttendTo {attendKeys = k, attendValues = v, attendPositions = seen, attendSequences = slot}
-  o <- B.linear "o" wo 0 att
-  y <- B.add "y" x o
-  B.output "x" y
-
-pagedLayer :: Program
-pagedLayer = B.program "t_paged" $ do
-  x <- B.input "x" (wholeRow 6) TF32
-  pos <- B.rowInts "position" 1 16
-  seen <- B.rowInts "seen" 1 16
-  blocks <- B.rowInts "blocks" 4 8
-  wq <- B.weight "q_proj" [16, 6]
-  wo <- B.weight "o_proj" [6, 16]
-  wg <- B.weight "gate" [12, 6]
-  wu <- B.weight "up" [12, 6]
-  wd <- B.weight "down" [6, 12]
-  sc <- B.weight "scalar" [1]
-  k <- B.cacheOf CacheF16 "k_cache" (Paged 8 4 2 4)
-  v <- B.cacheOf CacheF16 "v_cache" (Paged 8 4 2 4)
-  q <- B.linear "q" wq 4 x
-  qr <- B.rope "qr" (RopeSpec 100 1 1 RopeHalves) pos q
-  att <- B.attend "att" (AttnSpec 4 2 4 Nothing 0.5 Nothing) qr AttendTo {attendKeys = k, attendValues = v, attendPositions = seen, attendSequences = blocks}
-  o <- B.linear "o" wo 0 att
-  g <- B.linear "g" wg 0 x
-  u <- B.linear "u" wu 0 x
-  act <- B.geluMul "act" g u
-  m <- B.linear "m" wd 0 act
-  y1 <- B.add "y1" x o
-  y <- B.add "y" y1 m
-  z <- B.scaleBy "z" sc y
-  B.output "x" z
-
-draftOut :: Program
-draftOut = B.program "t_out" $ do
-  x <- B.input "x" (wholeRow 6) TF32
-  finalNorm <- B.weight "final_norm" [6]
-  headW <- B.weight "head" [40, 6]
-  post <- B.weight "post" [8, 6]
-  n <- B.rmsnorm "n" eps (Just finalNorm) 2 x
-  logits <- B.linear "logits" headW 0 n
-  capped <- B.softcap "capped" 4 logits
-  token <- B.argmax "token" capped
-  state <- B.linear "state" post 0 n
-  B.output "token" token
-  B.output "state" state
-  B.output "logits" capped
-
 draftStage :: Stage
-draftStage =
-  Stage
-    { stageName = "draft_step"
-    , stageParts =
-        [ Part "in" (checked draftIn) 2 [("tokens", Host "token"), ("state", Host "hidden"), ("embed", Tensor "embed"), ("proj", Tensor "pre_proj")]
-        , Part
-            "ring"
-            (checked ringLayer)
-            2
-            [ ("x", Earlier "in" "x")
-            , ("position", Host "position")
-            , ("seen", Host "seen")
-            , ("slot", Host "slot")
-            , ("norm", Tensor "l0.norm")
-            , ("q_proj", Tensor "l0.q_proj")
-            , ("q_norm", Tensor "l0.q_norm")
-            , ("o_proj", Tensor "l0.o_proj")
-            , ("k_cache", Mirror "k_ring" 6)
-            , ("v_cache", Mirror "v_ring" 6)
-            ]
-        , Part
-            "paged"
-            (checked pagedLayer)
-            2
-            [ ("x", Earlier "ring" "x")
-            , ("position", Host "position")
-            , ("seen", Host "seen")
-            , ("blocks", Host "blocks")
-            , ("q_proj", Tensor "l1.q_proj")
-            , ("o_proj", Tensor "l1.o_proj")
-            , ("gate", Tensor "l1.gate")
-            , ("up", Tensor "l1.up")
-            , ("down", Tensor "l1.down")
-            , ("scalar", Tensor "l1.scalar")
-            , ("k_cache", Mirror "k_paged" 16)
-            , ("v_cache", Mirror "v_paged" 16)
-            ]
-        , Part "out" (checked draftOut) 2 [("x", Earlier "paged" "x"), ("final_norm", Tensor "final_norm"), ("head", Tensor "head"), ("post", Tensor "post")]
-        ]
-    , stageOutputs = [("next_token", "out", "token"), ("next_state", "out", "state"), ("logits", "out", "logits")]
-    }
+draftStage = draftStageOf smallDraft
 
 draftData :: StageData
 draftData =
@@ -222,108 +103,13 @@ draftData =
 ------------------------------------------------------------------------------
 -- An image's tower
 
-towerEmbed :: Program
-towerEmbed = B.program "v_embed" $ do
-  patches <- B.input "patches" (wholeRow 12) TF32
-  places <- B.rowInts "places" 2 10
-  proj <- B.weight "patch_proj" [8, 12]
-  table <- B.weight "positions" [10, 8]
-  p <- B.linear "projected" proj 0 patches
-  g <- B.gather "placed" table places 1
-  x <- B.add "x" p g
-  B.output "x" x
-
-{- | A layer for rows of up to this many sequences, a ring's slot each,
-over an image of this many rows.
--}
-towerLayerOf :: Natural -> Natural -> Program
-towerLayerOf sequences m = B.program "v_layer" $ do
-  x <- B.input "x" (wholeRow 8) TF32
-  patch <- B.rowInts "patch" 1 m
-  axes <- B.rowInts "axes" 2 3
-  reach <- B.rowInts "reach" 1 m
-  slot <- B.rowInts "slot" 1 sequences
-  norm <- B.weight "norm" [8]
-  wq <- B.weight "q_proj" [8, 8]
-  wk <- B.weight "k_proj" [8, 8]
-  wv <- B.weight "v_proj" [8, 8]
-  qNorm <- B.weight "q_norm" [4]
-  kNorm <- B.weight "k_norm" [4]
-  wo <- B.weight "o_proj" [8, 8]
-  kc <- B.cacheOf CacheF16 "k_cache" (Ring sequences 2 m 4)
-  vc <- B.cacheOf CacheF16 "v_cache" (Ring sequences 2 m 4)
-  a <- B.rmsnorm "a" eps (Just norm) 1 x
-  q <- B.linear "q" wq 4 a
-  k <- B.linear "k" wk 4 a
-  v <- B.linear "v" wv 4 a
-  qn <- B.rmsnorm "qn" eps (Just qNorm) 1 q
-  kn <- B.rmsnorm "kn" eps (Just kNorm) 1 k
-  vn <- B.rmsnorm "vn" eps Nothing 1 v
-  let spec = RopeSpec 100 1 2 RopeHalves
-  qr <- B.rope "qr" spec axes qn
-  kr <- B.rope "kr" spec axes kn
-  B.kvStore "store_k" StoreAt {storeCache = kc, storePositions = patch, storeSequences = slot} kr
-  B.kvStore "store_v" StoreAt {storeCache = vc, storePositions = patch, storeSequences = slot} vn
-  att <- B.attend "att" (AttnSpec 2 2 4 Nothing 1 (Just (Reach reach.srcId 4))) qr AttendTo {attendKeys = kc, attendValues = vc, attendPositions = patch, attendSequences = slot}
-  o <- B.linear "o" wo 0 att
-  y <- B.add "y" x o
-  B.output "x" y
-
-towerPool :: Natural -> Program
-towerPool m = B.program "v_pool" $ do
-  squares <- B.rowInts "squares" 2 m
-  encoded <- B.rowsF32 "encoded" [m, 8]
-  bias <- B.weight "std_bias" [8]
-  scale <- B.weight "std_scale" [8]
-  proj <- B.weight "projector" [10, 8]
-  pooled <- B.gather "pooled" encoded squares 0.5
-  standard <- B.standardize "standardized" bias scale 2 pooled
-  normed <- B.rmsnorm "normed" eps Nothing 1 standard
-  soft <- B.linear "soft" proj 0 normed
-  B.output "soft" soft
-
 -- | The tower over an image of this many rows.
 towerStage :: Natural -> Stage
 towerStage = towerStageWith 1
 
 -- | 'towerStage', its layers' rows of up to this many sequences.
 towerStageWith :: Natural -> Natural -> Stage
-towerStageWith sequences m =
-  Stage
-    { stageName = "image_tower"
-    , stageParts =
-        [ Part "embed" (checked towerEmbed) m [("patches", Host "patches"), ("places", Host "places"), ("patch_proj", Tensor "patch_proj"), ("positions", Tensor "position_table")]
-        , layerPart "layer0" "embed" "l0"
-        , layerPart "layer1" "layer0" "l1"
-        , Part
-            "pool"
-            (checked (towerPool m))
-            3
-            [ ("squares", Host "squares")
-            , ("encoded", Earlier "layer1" "x")
-            , ("std_bias", Tensor "std_bias")
-            , ("std_scale", Tensor "std_scale")
-            , ("projector", Tensor "projector")
-            ]
-        ]
-    , stageOutputs = [("soft", "pool", "soft")]
-    }
- where
-  layerPart name from l =
-    Part
-      name
-      (checked (towerLayerOf sequences m))
-      m
-      ( [ ("x", Earlier from "x")
-        , ("patch", Host "patch")
-        , ("axes", Host "axes")
-        , ("reach", Host "reach")
-        , ("slot", Host "slot")
-        , ("k_cache", Own FirstRowMasks)
-        , ("v_cache", Own FirstRowMasks)
-        ]
-          <> [(w, Tensor (l <> "." <> w)) | w <- ["norm", "q_proj", "k_proj", "v_proj", "q_norm", "k_norm", "o_proj"]]
-      )
+towerStageWith sequences m = towerStageOf smallTower {towerSequences = sequences, towerRows = m}
 
 {- | An image of five patches over this many rows: rows past the fifth are
 padding, holding the first patch's pixels, at their own positions.

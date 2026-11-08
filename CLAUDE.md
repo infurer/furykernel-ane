@@ -72,9 +72,12 @@ The emitters write it from Haskell, so neither Python nor coremltools is
 needed. Programs are specification version 10 with the opset `CoreML9`,
 for macOS 26 and later: the newest that macOS 27.2's Core ML takes.
 
-It never runs anything on the ANE: it emits programs, which the consuming
-runtime compiles with Core ML at run time. So it builds and is tested on
-any system, and golden tests pin its output.
+The library never runs anything on the ANE itself: it emits programs,
+which the consuming runtime compiles with Core ML at run time. So it builds
+and is tested on any system, and golden tests pin its output; the Neural
+Engine conformance run (`test/ane/`) runs that output on an Apple silicon
+Mac. What the repository records of the ANE was observed on one M3 Max,
+under macOS 27.2.
 
 Like the core, it knows no models: programs for a particular model live with
 the runtime that runs them.
@@ -86,6 +89,7 @@ nix develop                # GHC, cabal, ghcid, hlint, cabal2nix, reuse, protoc
 cabal build                # inside the dev shell
 nix fmt
 nix flake check --all-systems --no-update-lock-file
+nix run .#ane-conformance  # on an Apple silicon Mac: the corpus on its ANE
 ```
 
 `flake.lock` pins the core, the `furykernel` input, as a
@@ -126,6 +130,14 @@ nix fmt && git diff --exit-code &&
     done
   )
 ```
+
+The Neural Engine conformance run needs a Mac's Neural Engine, so it is no
+check and runs outside CI: in the per-commit gate, on an Apple silicon Mac,
+at every commit from the one that adds it, with every case passing, and
+again on each new Mac or macOS. `nix run .#ane-conformance` runs the corpus
+of the working tree, uncommitted changes to tracked files included, so a
+change can be held to it before it is committed;
+`nix run .#ane-conformance -- DIR` runs the corpus in `DIR` instead.
 
 ## Architecture
 
@@ -175,9 +187,83 @@ nix fmt && git diff --exit-code &&
   program against its golden bytes, and two stages lowered (a drafting
   step's, an image tower's) whose programs, interpreted on the host's
   inputs, compute what the core's evaluator does, with the manifest of one
-  against its golden text. Apple's `coremlc` accepts what the
-  writer makes (checked by hand on a Mac; runtimes compile programs with
-  Core ML).
+  against its golden text. The stages are `Test.FuryKernel.Ane.Stages`', of
+  any size, which the conformance corpus takes too.
+
+- `test/ane/`: the Neural Engine conformance run (`apps.ane-conformance`).
+  `Cases.hs` writes its corpus: the tests' stages at sizes Core ML places
+  on the ANE (a drafting step whose output layer is two chunks, an image
+  tower 384 wide over 128 rows), a layer of Gemma 4's larger image tower
+  (1152 wide over 256 rows), and edge cases: norms over rows of zero, of
+  magnitudes from 2^-8 to 4096 and near 32768, and of one large element;
+  each head's norm at the shapes whose norm Core ML's CPU computed wrongly
+  along axis 2, the two small ones on the CPU alone, as Core ML places
+  them there anyway; attention over a mirror of 16384 positions, what no
+  row sees holding large numbers, and attention over all 16384, the length
+  the gate allows; a softcap saturating; argmaxes whose logits tie across
+  the output layer's chunks; residuals of rows near 2^-6 and near 30000;
+  sums whose running sums reach 30000 on their way to zero; attention over
+  all 16384 positions with every probability 2^-14 (`flat_mirror`); and
+  two cases held to the interpreter's model of the ANE bit for bit, which
+  f64 differs from by design: products the ANE's sums keep on their grid
+  of 2^-16, round away from zero, or drop by their operands' exponents
+  (`products_grid`), and running sums that pass 32768 on the way to
+  results that fit (`prefix_overflow`). The
+  drafting step, the Gemma 4 layer and the mirrors, whose references take
+  many minutes or gigabytes (the core's evaluator holds 15 to 40 GiB over
+  a mirror), are `ane-corpus-large`, which `checks.ane-corpus` leaves out:
+  its cases need 4 GiB. The data is a model's in scale: attention scores
+  of a few units, values sharing a part, weights of unit gain. Each case
+  is lowered by `lowerStage`, its inputs derived by `FuryKernel.Ane.Host`,
+  in dyadic numbers, exact in every sum the evaluator makes, or in
+  binary16 numbers of a full mantissa, and its outputs computed by the
+  core's evaluator and by the interpreter, both in f64, and by the
+  interpreter's `NeuralEngine` mode. The runner, Rust on objc2-core-ml,
+  compiles each case with Core ML as a runtime does, asserts from
+  `MLComputePlan` that every op runs on the ANE but the program's tail on
+  the CPU (`reduce_argmax`, and the `concat` that joins an output layer's
+  chunks for it), none of which the ANE reads again (an op the plan gives
+  no device is fused into another), predicts it twice, the same bits each
+  time, and holds each float output's rows within τ of their largest
+  magnitude in both f64 references, or of 2^-9/τ if that is larger, so
+  that a small row is held to 2^-9 absolutely: τ = 2^-7, but 2^-6 for an
+  output made through a softcap, which the generator marks `softcap` from
+  the stage's IR (rows below 2^-2, and below 2^-3, held absolutely). An
+  output marked `model` is held to the interpreter's `NeuralEngine` mode
+  bit for bit instead. A token must be the first largest of its predicted
+  logits and of a reference logit within twice its logits' τ of the
+  largest, or, of logits the corpus makes tie, the evaluator's. The norms
+  run on the CPU too, held to 2^-5 of their rows' largest magnitudes or of
+  2^-3. The comparison is unit-tested (`checks.ane-runner-tests`);
+  `ANE_CONFORMANCE_KEEP=DIR` writes every output as predicted.
+
+  The bounds are checked against the corpus rather than derived. There the
+  ANE's worst row is within 0.55 of τ (`range_low`'s small rows, held
+  absolutely; 0.36 elsewhere), a softcap's within 0.40 of its 2^-6 (the
+  ANE's tanh is up to 0.58 % low for small arguments), and the CPU's within
+  0.46 of its 2^-5: margins of 1.85 at the least. The ANE's errors come from
+  its sums, which the interpreter's `NeuralEngine` mode computes as the ANE
+  does (on `range_low`, `range_high`, `products_grid` and `prefix_overflow`
+  its bits are the ANE's), and from its own tanh, GELU, exp, softmax and
+  layer norm, which the mode computes exactly and rounds, so that it is
+  nearer f64 than the ANE where they make an output (the drafting step's
+  logits within 0.10 of their τ, the ANE's 0.30). Each product a sum takes
+  errs by up to 2^-17 whatever its size, so a convolution's outputs err by
+  about 2^-16·√(k/12) over a fan-in of k, hence the absolute 2^-9. Attention
+  over 16384 keys is within 0.14 of τ (`full_mirror`; `flat_mirror` 0.09),
+  as the lowering scales its probabilities by 2^8; unscaled, products of
+  probabilities near 1/n with the values sat on the sums' grid, 0.72 of 2^-6
+  over 16384 keys, and `flat_mirror` fails by 54τ. The sums overflow past
+  32768 even where their results would fit (`prefix_overflow`), so the other
+  cases keep them below (`long_sums`). Core ML's CPU sums in binary16, four
+  to eight times as far from f64 as the ANE. Planted defects fall outside
+  the bounds, most of them far: a softcap's tanh left out 511τ; a dropped
+  mask infinitely far (the hidden values overflow the sums); attention's
+  probabilities unscaled 54τ; attention's scale left out 14τ; rotary halves
+  paired wrongly 5.7τ to 98τ, its sign on the wrong half 7.9τ to 98τ; an
+  RMSNorm squaring its input scaled by 1/16 4.2τ to 158τ (infinite on the
+  CPU), its epsilon times 1024 112τ; and the cap raised to 16640 puts the
+  masked mirror on the CPU.
 
 - `vendor/coremltools/`: the Core ML model format's definitions, as
   published.
@@ -188,8 +274,11 @@ nix fmt && git diff --exit-code &&
   which decodes the golden bytes with protoc against the vendored
   definitions and compares them with the golden text, hlint over the
   library and its tests, cabal2nix-in-sync, `reuse lint` and the dev
-  shell), `devshell.nix`, `pins.nix` (`nix run .#check-pins`) and
-  `treefmt.nix` (`nix fmt` and `checks.treefmt`).
+  shell), `devshell.nix`, `pins.nix` (`nix run .#check-pins`), `rust.nix`
+  (crane and the Rust toolchain for the conformance runner, and rustfmt),
+  `ane.nix` (the corpus, `checks.ane-corpus` on every system; the runner,
+  the app, `checks.ane-runner-clippy` and `checks.ane-runner-tests` on
+  aarch64-darwin) and `treefmt.nix` (`nix fmt` and `checks.treefmt`).
 
 - `.gitlab-ci.yml`: GitLab CI on x86_64-linux runners. `checks` runs
   `nix flake check --all-systems`, which builds x86_64-linux's checks, and

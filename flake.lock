@@ -81,9 +81,17 @@
     },
     "root": {
       "inputs": {
+        "crane": [
+          "furykernel",
+          "crane"
+        ],
         "flake-parts": "flake-parts",
         "furykernel": "furykernel",
         "nixpkgs": "nixpkgs",
+        "rust-overlay": [
+          "furykernel",
+          "rust-overlay"
+        ],
         "treefmt-nix": "treefmt-nix"
       }
     },

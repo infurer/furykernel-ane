@@ -50,11 +50,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1794155772,
-        "narHash": "sha256-y72jvLx8LSBghLDmWFkilqG0YjZmvMfXoorFDqO8mB0=",
+        "lastModified": 1794205143,
+        "narHash": "sha256-GyxirDDzU/umy6GLxrAM2eA0lJUmTNh9QvAqnzoTQcg=",
         "owner": "infurer",
         "repo": "furykernel",
-        "rev": "715f244ed70301a54d7eb16e9840e08ccf8967ff",
+        "rev": "065b8e0548567d5762d1da1157a3cf1ce6619b49",
         "type": "github"
       },
       "original": {

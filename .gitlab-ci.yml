@@ -21,6 +21,8 @@ workflow:
     - when: always
 # Every system evaluated, x86_64-linux's checks built. The other systems'
 # checks are built before every commit (CLAUDE.md).
+# One derivation at a time, on four cores: the corpus's references,
+# 3.92 GB, beside other builds took a VM's memory.
 checks:
   stage: ci
   interruptible: true
@@ -28,8 +30,8 @@ checks:
     # The packages, listed by hand: x86_64-linux's is checks.build, which
     # the line below builds too; aarch64-linux's builds on its remote
     # builder. Their tests run in checkPhase.
-    - nix build --no-link --no-update-lock-file -L .#packages.x86_64-linux.furykernel-ane .#packages.aarch64-linux.furykernel-ane
-    - nix flake check --all-systems --no-update-lock-file -L
+    - nix build --no-link --no-update-lock-file -L --max-jobs 1 --cores 4 .#packages.x86_64-linux.furykernel-ane .#packages.aarch64-linux.furykernel-ane
+    - nix flake check --all-systems --no-update-lock-file -L --max-jobs 1 --cores 4
 # Every input of ours locked at a commit on GitHub master: it fails until a
 # branch's dependencies are merged, published and locked there, so that a
 # merge waits for them.
